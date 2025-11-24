@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'provider_skills_screen.dart';
 import 'provider_requests_screen.dart';
 import 'provider_profile_screen.dart';
+import 'provider_inbox_screen.dart';
 
 /// Home do prestador: abas para competências, chamados e perfil.
 class ProviderHomeScreen extends StatelessWidget {
@@ -17,6 +18,21 @@ class ProviderHomeScreen extends StatelessWidget {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Prestador'),
+
+          // ✅ Botão de Inbox / Conversas
+          actions: [
+            IconButton(
+              tooltip: 'Conversas',
+              icon: const Icon(Icons.chat_bubble_outline),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                      builder: (_) => const ProviderInboxScreen()),
+                );
+              },
+            ),
+          ],
+
           bottom: const TabBar(
             tabs: [
               Tab(icon: Icon(Icons.build_rounded), text: 'Competências'),
@@ -25,9 +41,7 @@ class ProviderHomeScreen extends StatelessWidget {
             ],
           ),
         ),
-
-        // ✅ IMPORTANTE: NÃO usar const aqui
-        body: TabBarView(
+        body: const TabBarView(
           children: [
             ProviderSkillsScreen(),
             ProviderRequestsScreen(),

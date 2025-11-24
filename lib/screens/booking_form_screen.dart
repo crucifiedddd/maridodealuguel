@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -29,6 +31,7 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
   final _notesCtrl = TextEditingController();
 
   DateTime? _dateTime;
+  bool _saving = false;
 
   @override
   void dispose() {
@@ -68,7 +71,9 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
   }
 
   Future<void> _submit() async {
+    if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
+
     if (_dateTime == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Escolha a data e horário.')),
@@ -76,27 +81,86 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
       return;
     }
 
+    setState(() => _saving = true);
+
     final app = context.read<AppState>();
+    final firebaseUser = FirebaseAuth.instance.currentUser;
 
-    final booking = Booking(
-      id: '', // será preenchido pelo Firestore
-      service: widget.service,
-      dateTime: _dateTime!,
-      address: _addressCtrl.text.trim(),
-      notes: _notesCtrl.text.trim(),
-      price: widget.service.basePrice,
-      status: BookingStatus.pending,
-    );
+    if (firebaseUser == null) {
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Usuário não logado.')),
+      );
+      return;
+    }
 
-    await app.addBooking(booking);
+    final clientId = firebaseUser.uid;
+    final clientName = app.currentUser?.name ?? firebaseUser.email ?? 'Cliente';
 
-    if (!mounted) return;
+    // 🔹 Monta o booking para salvar no Firestore
+    final bookingData = {
+      'clientId': clientId,
+      'clientName': clientName,
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Agendamento criado com sucesso!')),
-    );
+      // providerId ainda não existe aqui (só quando aceitar)
+      'providerId': '',
+      'providerName': '',
 
-    Navigator.of(context).pop(); // volta para a lista de serviços/agenda
+      'serviceId': widget.service.id,
+      'serviceName': widget.service.name,
+      'serviceDescription': widget.service.description,
+      'serviceIcon': widget.service.icon,
+      'price': widget.service.basePrice,
+      'status': 'pending',
+
+      'address': _addressCtrl.text.trim(),
+      'notes': _notesCtrl.text.trim(),
+      'dateTime': Timestamp.fromDate(_dateTime!),
+
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+
+    try {
+      // ✅ 1) Salva booking
+      final bookingRef = await FirebaseFirestore.instance
+          .collection('bookings')
+          .add(bookingData);
+
+      final bookingId = bookingRef.id;
+
+      // ✅ 2) Cria chat automaticamente usando o MESMO ID do booking
+      // Como ainda não tem prestador, participants começa só com o cliente
+      await FirebaseFirestore.instance.collection('chats').doc(bookingId).set({
+        'bookingId': bookingId,
+        'clientId': clientId,
+        'providerId': '',
+        'clientName': clientName,
+        'providerName': '',
+        'participants': [clientId],
+        'lastMessage': '',
+        'lastTimestamp': FieldValue.serverTimestamp(),
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      // Atualiza lista local de agendamentos
+      await app.loadBookings();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Agendamento criado com sucesso!')),
+      );
+
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao criar agendamento: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -155,9 +219,15 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                icon: const Icon(Icons.check),
-                label: const Text('Confirmar agendamento'),
-                onPressed: _submit,
+                icon: _saving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.check),
+                label: Text(_saving ? 'Salvando...' : 'Confirmar agendamento'),
+                onPressed: _saving ? null : _submit,
               ),
             ),
           ],

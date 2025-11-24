@@ -3,235 +3,292 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import 'chat_screen.dart';
+import '../models/service.dart';
+
 class BookingsScreen extends StatelessWidget {
   const BookingsScreen({super.key});
 
   static const routeName = '/bookings';
 
-  String _formatDate(dynamic ts) {
-    if (ts == null) return '—';
-    if (ts is Timestamp) {
-      return DateFormat('dd/MM/yyyy • HH:mm').format(ts.toDate());
+  Future<void> _cancelBooking(
+    BuildContext context,
+    String bookingId,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('bookings')
+          .doc(bookingId)
+          .update({
+        'status': 'cancelled',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Agendamento cancelado.')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Erro ao cancelar: $e')),
+      );
     }
-    if (ts is DateTime) {
-      return DateFormat('dd/MM/yyyy • HH:mm').format(ts);
-    }
-    return ts.toString();
   }
 
-  String _formatPrice(dynamic value) {
-    final v = (value ?? 0).toDouble();
-    return NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(v);
+  String _formatDate(dynamic rawDate) {
+    try {
+      DateTime dt;
+
+      if (rawDate is Timestamp) {
+        dt = rawDate.toDate();
+      } else if (rawDate is DateTime) {
+        dt = rawDate;
+      } else if (rawDate is String) {
+        dt = DateTime.parse(rawDate);
+      } else {
+        return '---';
+      }
+
+      return DateFormat('dd/MM/yyyy HH:mm').format(dt);
+    } catch (_) {
+      return '---';
+    }
   }
 
-  String _statusLabel(String status) {
-    switch (status) {
-      case 'pending':
-        return 'Pendente';
+  Color _statusColor(String s) {
+    switch (s) {
+      case 'accepted':
+        return Colors.green;
+      case 'rejected':
+        return Colors.redAccent;
+      case 'cancelled':
+        return Colors.grey;
+      default:
+        return Colors.teal;
+    }
+  }
+
+  String _statusLabel(String s) {
+    switch (s) {
       case 'accepted':
         return 'Aceito';
       case 'rejected':
         return 'Recusado';
-      case 'done':
-        return 'Concluído';
+      case 'cancelled':
+        return 'Cancelado';
       default:
-        return status;
-    }
-  }
-
-  Color _statusColor(String status) {
-    switch (status) {
-      case 'pending':
-        return Colors.orange;
-      case 'accepted':
-        return Colors.green;
-      case 'rejected':
-        return Colors.red;
-      case 'done':
-        return Colors.teal;
-      default:
-        return Colors.grey;
+        return 'Pendente';
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
 
-    if (uid == null) {
-      return const Center(child: Text('Usuário não autenticado.'));
-    }
-
-    // ✅ OPÇÃO A APLICADA: usando userId
     final stream = FirebaseFirestore.instance
         .collection('bookings')
-        .where('userId', isEqualTo: uid)
+        .where('clientId', isEqualTo: uid)
         .orderBy('dateTime', descending: true)
         .snapshots();
 
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.teal.withOpacity(0.05),
-            Colors.white,
-            Colors.white,
-          ],
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.teal.withOpacity(0.08),
+              Colors.white,
+              Colors.white,
+            ],
+          ),
         ),
-      ),
-      child: SafeArea(
-        child: StreamBuilder<QuerySnapshot>(
-          stream: stream,
-          builder: (context, snap) {
-            if (snap.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
+        child: SafeArea(
+          child: StreamBuilder<QuerySnapshot>(
+            stream: stream,
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
-            if (snap.hasError) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(
-                    'Erro ao carregar agendamentos:\n${snap.error}',
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-              );
-            }
-
-            final docs = snap.data?.docs ?? [];
-
-            if (docs.isEmpty) {
-              return const Center(
-                child: Text(
-                  'Você ainda não possui agendamentos.',
-                  textAlign: TextAlign.center,
-                ),
-              );
-            }
-
-            return ListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-              itemCount: docs.length,
-              itemBuilder: (_, i) {
-                final raw = docs[i].data() as Map<String, dynamic>;
-
-                final serviceName = raw['serviceName'] ?? 'Serviço';
-                final dateTime = raw['dateTime'];
-                final providerName = raw['providerName'] ?? 'Prestador';
-                final address = raw['address'] ?? raw['clientAddress'] ?? '—';
-                final price = raw['price'] ?? raw['basePrice'] ?? 0;
-                final status = raw['status'] ?? 'pending';
-
-                final statusColor = _statusColor(status);
-
-                return Card(
-                  elevation: 0,
-                  margin: const EdgeInsets.only(bottom: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
+              if (snap.hasError) {
+                return Center(
                   child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Título + status
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                serviceName,
-                                style: const TextStyle(
-                                  fontSize: 16.5,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: statusColor.withOpacity(0.12),
-                                borderRadius: BorderRadius.circular(999),
-                                border: Border.all(
-                                  color: statusColor.withOpacity(0.35),
-                                ),
-                              ),
-                              child: Text(
-                                _statusLabel(status),
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: statusColor,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 10),
-
-                        // Data
-                        Row(
-                          children: [
-                            Icon(Icons.schedule,
-                                size: 16, color: Colors.grey.shade700),
-                            const SizedBox(width: 6),
-                            Text(_formatDate(dateTime)),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-
-                        // Prestador
-                        Row(
-                          children: [
-                            Icon(Icons.person_outline,
-                                size: 16, color: Colors.grey.shade700),
-                            const SizedBox(width: 6),
-                            Expanded(child: Text(providerName)),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-
-                        // Endereço
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(Icons.place_outlined,
-                                size: 16, color: Colors.grey.shade700),
-                            const SizedBox(width: 6),
-                            Expanded(child: Text(address)),
-                          ],
-                        ),
-
-                        const SizedBox(height: 8),
-
-                        // Valor
-                        Row(
-                          children: [
-                            Icon(Icons.attach_money,
-                                size: 16, color: Colors.grey.shade700),
-                            const SizedBox(width: 4),
-                            Text(
-                              _formatPrice(price),
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'Erro ao carregar agendamentos:\n${snap.error}',
+                      textAlign: TextAlign.center,
                     ),
                   ),
                 );
-              },
-            );
-          },
+              }
+
+              final docs = snap.data?.docs ?? [];
+
+              if (docs.isEmpty) {
+                return const Center(
+                  child: Text('Você ainda não possui agendamentos.'),
+                );
+              }
+
+              return ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+                itemCount: docs.length,
+                itemBuilder: (_, i) {
+                  final d = docs[i];
+                  final raw = d.data() as Map<String, dynamic>;
+                  final bookingId = d.id;
+
+                  final status = (raw['status'] ?? 'pending') as String;
+                  final statusColor = _statusColor(status);
+
+                  final service = Service(
+                    id: (raw['serviceId'] ?? '') as String,
+                    name: (raw['serviceName'] ?? 'Serviço') as String,
+                    description: (raw['serviceDescription'] ?? '') as String,
+                    basePrice: (raw['price'] ?? 0).toDouble(),
+                    icon: (raw['serviceIcon'] ?? '🛠️') as String,
+                    active: (raw['serviceActive'] ?? true) as bool,
+                    order: (raw['serviceOrder'] ?? 0) as int,
+                  );
+
+                  final dateLabel = _formatDate(raw['dateTime']);
+                  final priceText = (raw['price'] ?? service.basePrice)
+                      .toDouble()
+                      .toStringAsFixed(2);
+
+                  final providerId = (raw['providerId'] ?? '') as String;
+                  final providerName =
+                      (raw['providerName'] ?? 'Prestador') as String;
+
+                  final canCancel = status == 'pending' || status == 'accepted';
+
+                  return Card(
+                    elevation: 0,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // topo
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  service.name,
+                                  style: const TextStyle(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: statusColor.withOpacity(.12),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  _statusLabel(status),
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 12,
+                                    color: statusColor,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+
+                          Row(
+                            children: [
+                              Icon(Icons.calendar_today_outlined,
+                                  size: 15, color: Colors.grey.shade700),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'Data: $dateLabel',
+                                  style: TextStyle(color: Colors.grey.shade800),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+
+                          Text(
+                            'Valor: R\$ $priceText',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14.5,
+                            ),
+                          ),
+
+                          const SizedBox(height: 14),
+
+                          if (canCancel)
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: () =>
+                                    _cancelBooking(context, bookingId),
+                                icon: const Icon(Icons.block, size: 18),
+                                label: const Text('Cancelar agendamento'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.grey.shade800,
+                                  side: BorderSide(color: Colors.grey.shade400),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                          if (providerId.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton.icon(
+                                onPressed: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => ChatScreen(
+                                        bookingId: bookingId,
+                                        clientId: uid,
+                                        providerId: providerId,
+                                        otherName: providerName,
+                                      ),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.chat_bubble_outline,
+                                    size: 18),
+                                label: const Text('Chat'),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: Colors.teal,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
         ),
       ),
     );

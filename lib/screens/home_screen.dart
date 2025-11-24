@@ -8,6 +8,7 @@ import '../state/app_state.dart';
 import 'service_detail_screen.dart';
 import 'bookings_screen.dart';
 import 'profile_screen.dart';
+import 'chat_list_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -60,10 +61,22 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 /// ===== ABA 1: Serviços disponíveis para solicitar =====
-class _ServicesTab extends StatelessWidget {
+class _ServicesTab extends StatefulWidget {
   const _ServicesTab({this.userName});
-
   final String? userName;
+
+  @override
+  State<_ServicesTab> createState() => _ServicesTabState();
+}
+
+class _ServicesTabState extends State<_ServicesTab> {
+  final _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -83,7 +96,7 @@ class _ServicesTab extends StatelessWidget {
       ),
       child: SafeArea(
         child: StreamBuilder<List<Service>>(
-          stream: repo.streamAll(), // 🔥 pega os serviços do Firestore
+          stream: repo.streamAll(),
           builder: (context, snap) {
             if (snap.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
@@ -101,14 +114,20 @@ class _ServicesTab extends StatelessWidget {
               );
             }
 
-            // serviços do banco
             final services = snap.data ?? const <Service>[];
 
-            // só ativos (se seu model usa active)
             final activeServices = services
                 .where((s) => s.active == true)
                 .toList()
               ..sort((a, b) => a.order.compareTo(b.order));
+
+            final query = _searchCtrl.text.trim().toLowerCase();
+            final filtered = query.isEmpty
+                ? activeServices
+                : activeServices.where((s) {
+                    return s.name.toLowerCase().contains(query) ||
+                        s.description.toLowerCase().contains(query);
+                  }).toList();
 
             return ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -121,30 +140,42 @@ class _ServicesTab extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        'Olá, ${userName ?? "cliente"}',
+                        'Olá, ${widget.userName ?? "cliente"}',
                         style: const TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
                     ),
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(14),
-                        boxShadow: [
-                          BoxShadow(
-                            blurRadius: 10,
-                            offset: const Offset(0, 4),
-                            color: Colors.black.withOpacity(0.06),
+
+                    // 🔔 BOTÃO NOTIFICAÇÕES -> ABRE INBOX
+                    InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const ChatListScreen(),
                           ),
-                        ],
-                      ),
-                      child: const Icon(
-                        Icons.notifications_none_rounded,
-                        color: Colors.teal,
+                        );
+                      },
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: [
+                            BoxShadow(
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                              color: Colors.black.withOpacity(0.06),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.notifications_none_rounded,
+                          color: Colors.teal,
+                        ),
                       ),
                     ),
                   ],
@@ -152,10 +183,10 @@ class _ServicesTab extends StatelessWidget {
 
                 const SizedBox(height: 14),
 
-                // ===== Barra de busca fake =====
+                // ===== Barra de busca REAL =====
                 Container(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(16),
@@ -168,15 +199,15 @@ class _ServicesTab extends StatelessWidget {
                       ),
                     ],
                   ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.search, color: Colors.grey.shade600),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Buscar serviço',
-                        style: TextStyle(color: Colors.grey.shade600),
-                      ),
-                    ],
+                  child: TextField(
+                    controller: _searchCtrl,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      icon: Icon(Icons.search, color: Colors.grey.shade600),
+                      hintText: 'Buscar serviço',
+                      hintStyle: TextStyle(color: Colors.grey.shade600),
+                      border: InputBorder.none,
+                    ),
                   ),
                 ),
 
@@ -191,18 +222,18 @@ class _ServicesTab extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
 
-                if (activeServices.isEmpty)
+                if (filtered.isEmpty)
                   const Padding(
                     padding: EdgeInsets.only(top: 24),
                     child: Center(
                       child: Text(
-                        'Nenhum serviço disponível no momento.',
+                        'Nenhum serviço encontrado.',
                         textAlign: TextAlign.center,
                       ),
                     ),
                   ),
 
-                ...activeServices.map((s) => _ServiceCard(service: s)).toList(),
+                ...filtered.map((s) => _ServiceCard(service: s)).toList(),
               ],
             );
           },
@@ -214,7 +245,6 @@ class _ServicesTab extends StatelessWidget {
 
 class _ServiceCard extends StatelessWidget {
   const _ServiceCard({required this.service});
-
   final Service service;
 
   @override
